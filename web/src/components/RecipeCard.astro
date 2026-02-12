@@ -1,0 +1,46 @@
+---
+import TagBadge from "./TagBadge.astro";
+
+interface Props {
+  id: number;
+  title: string;
+  imageUrl: string;
+  prepTime: number | null;
+  servings: number;
+  source: string;
+  isFavorite: boolean;
+  tags: string[];
+}
+
+const { id, title, imageUrl, prepTime, servings, source, isFavorite, tags } = Astro.props;
+const sourceClass = source === "ah.be" ? "ah" : "dm";
+const sourceLabel = source === "ah.be" ? "AH" : "DM";
+---
+
+<article class="recipe-card">
+  <a href={`/recepten/${id}`}>
+    <div class="card-image">
+      {imageUrl && <img src={imageUrl} alt={title} loading="lazy" />}
+      <div class="card-badges">
+        <span class:list={["source", sourceClass]}>{sourceLabel}</span>
+        <span class:list={["badge", isFavorite ? "fav" : "discover"]}>{isFavorite ? "Favoriet" : "Ontdekt"}</span>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>{title}</h3>
+      <div class="card-meta">
+        {prepTime && <span>{prepTime} min</span>}
+        <span>{servings} pers.</span>
+      </div>
+      {
+        tags.length > 0 && (
+          <div class="tags">
+            {tags.slice(0, 4).map((t) => (
+              <TagBadge name={t} />
+            ))}
+          </div>
+        )
+      }
+    </div>
+  </a>
+</article>

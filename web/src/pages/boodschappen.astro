@@ -1,0 +1,118 @@
+---
+import Base from "../layouts/Base.astro";
+import { db } from "../db/client";
+import { menuWeeks, menuSlots, recipes, ingredients, bonuses } from "../db/schema";
+import { desc, eq, asc } from "drizzle-orm";
+import { aggregateShoppingList, type ShoppingItem } from "../lib/shopping";
+
+// Haal meest recente weekmenu op
+const [currentMenu] = await db
+  .select()
+  .from(menuWeeks)
+  .orderBy(desc(menuWeeks.createdAt))
+  .limit(1);
+
+let items: ShoppingItem[] = [];
+let categories: string[] = [];
+let allBonuses: { productName: string; discountLabel: string }[] = [];
+
+if (currentMenu) {
+  // Haal menu recepten op
+  const menuSlotRows = await db
+    .select({
+      recipeId: menuSlots.recipeId,
+      title: recipes.title,
+    })
+    .from(menuSlots)
+    .innerJoin(recipes, eq(menuSlots.recipeId, recipes.id))
+    .where(eq(menuSlots.menuWeekId, currentMenu.id));
+
+  // Haal ingrediënten per recept op
+  const ingredientInputs = [];
+  for (const slot of menuSlotRows) {
+    const recipeIngredients = await db
+      .select()
+      .from(ingredients)
+      .where(eq(ingredients.recipeId, slot.recipeId))
+      .orderBy(asc(ingredients.sortOrder));
+
+    for (const ing of recipeIngredients) {
+      ingredientInputs.push({
+        name: ing.name,
+        quantity: ing.quantity,
+        unit: ing.unit,
+        recipeName: slot.title,
+      });
+    }
+  }
+
+  items = aggregateShoppingList(ingredientInputs);
+
+  // Unieke categorieën
+  categories = [...new Set(items.map((i) => i.category))];
+
+  // Bonussen voor matching
+  allBonuses = await db
+    .select({ productName: bonuses.productName, discountLabel: bonuses.discountLabel })
+    .from(bonuses);
+}
+
+function matchBonus(itemName: string): string | null {
+  const itemWords = itemName.toLowerCase().split(/[\s\-]+/).filter((w) => w.length >= 4);
+  if (itemWords.length === 0) return null;
+  for (const b of allBonuses) {
+    const productWords = b.productName.toLowerCase().split(/[\s\-]+/).filter((w) => w.length >= 4 && w !== "ah");
+    const match = itemWords.some((iw) => productWords.some((pw) => pw === iw || pw.startsWith(iw) || iw.startsWith(pw)));
+    if (match) return b.discountLabel;
+  }
+  return null;
+}
+---
+
+<Base title="Boodschappenlijst">
+  <div class="page-header">
+    <h1>Boodschappenlijst</h1>
+    {currentMenu && <p>Week van {currentMenu.weekStart}</p>}
+  </div>
+
+  {
+    !currentMenu ? (
+      <div class="empty-state">
+        <p>Geen weekmenu gevonden.</p>
+        <a href="/menu" class="btn btn-primary">
+          Genereer eerst een weekmenu
+        </a>
+      </div>
+    ) : items.length === 0 ? (
+      <div class="empty-state">
+        <p>Geen ingrediënten gevonden in het weekmenu.</p>
+      </div>
+    ) : (
+      categories.map((cat) => {
+        const catItems = items.filter((i) => i.category === cat);
+        return (
+          <div class="shopping-category">
+            <h3>{cat}</h3>
+            <ul class="shopping-list">
+              {catItems.map((item) => {
+                const bonus = matchBonus(item.name);
+                return (
+                  <li>
+                    <span class="item-qty">
+                      {item.totalQuantity} {item.unit}
+                    </span>
+                    <span class="item-name">
+                      {item.displayName}
+                      {bonus && <span class="item-bonus"> {bonus}</span>}
+                    </span>
+                    <span class="item-recipes">{item.fromRecipes.join(", ")}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })
+    )
+  }
+</Base>

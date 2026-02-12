@@ -1,0 +1,126 @@
+---
+import Base from "../../layouts/Base.astro";
+import { db } from "../../db/client";
+import { menuWeeks, menuSlots, recipes } from "../../db/schema";
+import { desc, eq } from "drizzle-orm";
+import { DAY_NAMES } from "../../lib/menu";
+
+// Haal meest recente weekmenu op
+const [currentMenu] = await db
+  .select()
+  .from(menuWeeks)
+  .orderBy(desc(menuWeeks.createdAt))
+  .limit(1);
+
+interface SlotData {
+  dayOfWeek: number;
+  dayName: string;
+  recipe: {
+    id: number;
+    title: string;
+    imageUrl: string;
+    prepTime: number | null;
+    source: string;
+  } | null;
+  slotId: number | null;
+}
+
+const slots: SlotData[] = DAY_NAMES.map((name, i) => ({
+  dayOfWeek: i,
+  dayName: name,
+  recipe: null,
+  slotId: null,
+}));
+
+if (currentMenu) {
+  const menuSlotRows = await db
+    .select({
+      slotId: menuSlots.id,
+      dayOfWeek: menuSlots.dayOfWeek,
+      recipeId: menuSlots.recipeId,
+      title: recipes.title,
+      imageUrl: recipes.imageUrl,
+      prepTime: recipes.prepTime,
+      source: recipes.source,
+    })
+    .from(menuSlots)
+    .innerJoin(recipes, eq(menuSlots.recipeId, recipes.id))
+    .where(eq(menuSlots.menuWeekId, currentMenu.id));
+
+  for (const row of menuSlotRows) {
+    const slot = slots[row.dayOfWeek];
+    if (slot) {
+      slot.recipe = {
+        id: row.recipeId,
+        title: row.title,
+        imageUrl: row.imageUrl,
+        prepTime: row.prepTime,
+        source: row.source,
+      };
+      slot.slotId = row.slotId;
+    }
+  }
+}
+---
+
+<Base title="Weekmenu">
+  <div class="page-header">
+    <h1>Weekmenu</h1>
+    {currentMenu && <p>Week van {currentMenu.weekStart}</p>}
+  </div>
+
+  <div class="menu-actions">
+    <form method="post" action="/api/menu/generate">
+      <button type="submit" class="btn btn-primary">
+        {currentMenu ? "Nieuw menu genereren" : "Genereer weekmenu"}
+      </button>
+    </form>
+    {
+      currentMenu && (
+        <a href="/boodschappen" class="btn">
+          Boodschappenlijst &rarr;
+        </a>
+      )
+    }
+  </div>
+
+  <div class="menu-grid">
+    {
+      slots.map((slot) => (
+        <div class="menu-slot">
+          <div class="day-name">{slot.dayName}</div>
+          {slot.recipe ? (
+            <>
+              {slot.recipe.imageUrl && (
+                <a href={`/recepten/${slot.recipe.id}`}>
+                  <img src={slot.recipe.imageUrl} alt={slot.recipe.title} loading="lazy" />
+                </a>
+              )}
+              <h4>
+                <a href={`/recepten/${slot.recipe.id}`}>{slot.recipe.title}</a>
+              </h4>
+              <div class="card-meta">
+                {slot.recipe.prepTime && <span>{slot.recipe.prepTime} min</span>}
+                <span class:list={["source", slot.recipe.source === "ah.be" ? "ah" : "dm"]}>
+                  {slot.recipe.source === "ah.be" ? "AH" : "DM"}
+                </span>
+              </div>
+              <div class="actions">
+                <form method="post" action="/api/menu/swap">
+                  <input type="hidden" name="slotId" value={String(slot.slotId)} />
+                  <button type="submit">Verwissel</button>
+                </form>
+                <form method="post" action="/api/menu/remove">
+                  <input type="hidden" name="slotId" value={String(slot.slotId)} />
+                  <button type="submit">Verwijder</button>
+                </form>
+              </div>
+            </>
+          ) : (
+            <p class="empty">Geen recept</p>
+          )}
+        </div>
+      ))
+    }
+  </div>
+</Base>

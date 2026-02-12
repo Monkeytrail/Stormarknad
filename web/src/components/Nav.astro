@@ -1,0 +1,14 @@
+---
+const pathname = Astro.url.pathname;
+---
+
+<nav>
+  <div class="container">
+    <a href="/" class="logo">Stormarknad</a>
+    <div class="links">
+      <a href="/menu" class:list={[{ active: pathname.startsWith("/menu") }]}>Menu</a>
+      <a href="/recepten" class:list={[{ active: pathname.startsWith("/recepten") }]}>Recepten</a>
+      <a href="/boodschappen" class:list={[{ active: pathname === "/boodschappen" }]}>Boodschappen</a>
+    </div>
+  </div>
+</nav>

@@ -1,0 +1,125 @@
+---
+import Base from "../../layouts/Base.astro";
+import RecipeCard from "../../components/RecipeCard.astro";
+import { db } from "../../db/client";
+import { recipes, recipeTags, tags, ingredients } from "../../db/schema";
+import { eq, asc, like } from "drizzle-orm";
+
+// Filters uit query params
+const source = Astro.url.searchParams.get("bron") || "";
+const typeFilter = Astro.url.searchParams.get("type") || "";
+const tagFilter = Astro.url.searchParams.get("tag") || "";
+const search = Astro.url.searchParams.get("q")?.trim() || "";
+
+// Alle tags ophalen voor filter dropdown
+const allTags = await db.select().from(tags).orderBy(asc(tags.name));
+
+// Recepten ophalen met tags
+let query = db
+  .select({
+    id: recipes.id,
+    title: recipes.title,
+    imageUrl: recipes.imageUrl,
+    prepTime: recipes.prepTime,
+    servings: recipes.servings,
+    source: recipes.source,
+    isFavorite: recipes.isFavorite,
+  })
+  .from(recipes)
+  .orderBy(asc(recipes.title));
+
+const allRecipes = await query;
+
+// Tags per recept ophalen
+const allRecipeTags = await db
+  .select({
+    recipeId: recipeTags.recipeId,
+    tagName: tags.name,
+  })
+  .from(recipeTags)
+  .innerJoin(tags, eq(recipeTags.tagId, tags.id));
+
+const recipeTagMap = new Map<number, string[]>();
+for (const rt of allRecipeTags) {
+  const existing = recipeTagMap.get(rt.recipeId) ?? [];
+  existing.push(rt.tagName);
+  recipeTagMap.set(rt.recipeId, existing);
+}
+
+// Ingrediënten zoeken: haal matching recipe IDs op
+let searchRecipeIds: Set<number> | null = null;
+if (search) {
+  // Escape SQL LIKE wildcards
+  const escaped = search.toLowerCase().replace(/[%_]/g, "\\$&");
+  const term = `%${escaped}%`;
+  const matches = await db
+    .select({ recipeId: ingredients.recipeId })
+    .from(ingredients)
+    .where(like(ingredients.name, term));
+  searchRecipeIds = new Set(matches.map((m) => m.recipeId));
+}
+
+// Filter toepassen
+let filtered = allRecipes;
+if (search && searchRecipeIds) {
+  filtered = filtered.filter((r) => searchRecipeIds!.has(r.id));
+}
+if (source) {
+  filtered = filtered.filter((r) => r.source === source);
+}
+if (typeFilter) {
+  filtered = filtered.filter((r) => typeFilter === "fav" ? r.isFavorite : !r.isFavorite);
+}
+if (tagFilter) {
+  filtered = filtered.filter((r) => {
+    const rTags = recipeTagMap.get(r.id) ?? [];
+    return rTags.includes(tagFilter);
+  });
+}
+---
+
+<Base title="Recepten">
+  <div class="page-header">
+    <h1>Recepten</h1>
+    <p>{filtered.length} recepten</p>
+  </div>
+
+  <div class="filters">
+    <form method="get">
+      <input type="text" name="q" value={search} placeholder="Zoek op ingrediënt..." />
+      <select name="bron" onchange="this.form.submit()">
+        <option value="">Alle bronnen</option>
+        <option value="ah.be" selected={source === "ah.be"}>Albert Heijn</option>
+        <option value="koken.demorgen" selected={source === "koken.demorgen"}>De Morgen</option>
+      </select>
+      <select name="type" onchange="this.form.submit()">
+        <option value="">Alle recepten</option>
+        <option value="fav" selected={typeFilter === "fav"}>Favorieten</option>
+        <option value="discover" selected={typeFilter === "discover"}>Ontdekt</option>
+      </select>
+      <select name="tag" onchange="this.form.submit()">
+        <option value="">Alle tags</option>
+        {allTags.map((t) => (
+          <option value={t.name} selected={tagFilter === t.name}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+    </form>
+  </div>
+
+  <div class="recipe-grid">
+    {filtered.map((r) => (
+      <RecipeCard
+        id={r.id}
+        title={r.title}
+        imageUrl={r.imageUrl}
+        prepTime={r.prepTime}
+        servings={r.servings}
+        source={r.source}
+        isFavorite={r.isFavorite}
+        tags={recipeTagMap.get(r.id) ?? []}
+      />
+    ))}
+  </div>
+</Base>

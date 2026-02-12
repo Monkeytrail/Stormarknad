@@ -1,0 +1,120 @@
+---
+import Base from "../../layouts/Base.astro";
+import TagBadge from "../../components/TagBadge.astro";
+import { db } from "../../db/client";
+import { recipes, ingredients, instructions, recipeTags, tags } from "../../db/schema";
+import { eq, asc } from "drizzle-orm";
+
+const { id } = Astro.params;
+const recipeId = parseInt(id!);
+
+if (isNaN(recipeId)) {
+  return Astro.redirect("/recepten");
+}
+
+const [recipe] = await db.select().from(recipes).where(eq(recipes.id, recipeId));
+
+if (!recipe) {
+  return Astro.redirect("/recepten");
+}
+
+const recipeIngredients = await db
+  .select()
+  .from(ingredients)
+  .where(eq(ingredients.recipeId, recipeId))
+  .orderBy(asc(ingredients.sortOrder));
+
+const recipeInstructions = await db
+  .select()
+  .from(instructions)
+  .where(eq(instructions.recipeId, recipeId))
+  .orderBy(asc(instructions.stepNumber));
+
+const recipeTags_ = await db
+  .select({ name: tags.name })
+  .from(recipeTags)
+  .innerJoin(tags, eq(recipeTags.tagId, tags.id))
+  .where(eq(recipeTags.recipeId, recipeId));
+
+const sourceClass = recipe.source === "ah.be" ? "ah" : "dm";
+const sourceLabel = recipe.source === "ah.be" ? "Albert Heijn" : "De Morgen";
+
+function formatQty(ing: { quantity: string; unit: string }) {
+  const parts = [ing.quantity, ing.unit].filter(Boolean);
+  return parts.join(" ");
+}
+---
+
+<Base title={recipe.title}>
+  <div class="recipe-detail">
+    <a href="/recepten" class="back-link">&larr; Terug naar recepten</a>
+
+    {recipe.imageUrl && <img src={recipe.imageUrl} alt={recipe.title} class="hero-img" />}
+
+    <h1>{recipe.title}</h1>
+
+    <div class="detail-meta">
+      <div>
+        <div class="label">Bron</div>
+        <div class="value">
+          <span class:list={["source", sourceClass]}>{sourceLabel}</span>
+        </div>
+      </div>
+      <div>
+        <div class="label">Type</div>
+        <div class="value">
+          <span class:list={["badge", recipe.isFavorite ? "fav" : "discover"]}>{recipe.isFavorite ? "Favoriet" : "Ontdekt"}</span>
+        </div>
+      </div>
+      <div>
+        <div class="label">Porties</div>
+        <div class="value">{recipe.servings}</div>
+      </div>
+      {
+        recipe.prepTime && (
+          <div>
+            <div class="label">Bereidingstijd</div>
+            <div class="value">{recipe.prepTime} min</div>
+          </div>
+        )
+      }
+      {
+        recipe.calories && (
+          <div>
+            <div class="label">Calorieën</div>
+            <div class="value">{recipe.calories} kcal</div>
+          </div>
+        )
+      }
+    </div>
+
+    {
+      recipeTags_.length > 0 && (
+        <div class="tags" style="margin-bottom: 1.5rem; margin-top: -0.5rem;">
+          {recipeTags_.map((t) => (
+            <TagBadge name={t.name} />
+          ))}
+        </div>
+      )
+    }
+
+    <h2>Ingrediënten</h2>
+    <ul class="ingredient-list">
+      {
+        recipeIngredients.map((ing) => (
+          <li>
+            <span>{ing.name}</span>
+            {formatQty(ing) && <span class="qty">{formatQty(ing)}</span>}
+          </li>
+        ))
+      }
+    </ul>
+
+    <h2>Bereiding</h2>
+    <ol class="steps">
+      {recipeInstructions.map((step) => <li><span>{step.text}</span></li>)}
+    </ol>
+
+    <a href={recipe.url} target="_blank" rel="noopener" class="original-link">Bekijk origineel recept &rarr;</a>
+  </div>
+</Base>

@@ -1,0 +1,22 @@
+{
+  "name": "web",
+  "type": "module",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "seed": "bun run src/db/seed.ts",
+    "db:push": "bunx drizzle-kit push",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/netlify": "^6.6.4",
+    "@libsql/client": "^0.17.0",
+    "astro": "^5.17.1",
+    "drizzle-orm": "^0.45.1"
+  },
+  "devDependencies": {
+    "drizzle-kit": "^0.31.9"
+  }
+}

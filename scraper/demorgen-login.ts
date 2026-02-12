@@ -1,146 +1,103 @@
-import { chromium, type BrowserContext, type Page } from "playwright";
+import { chromium } from "playwright";
 import { join } from "path";
-import { existsSync } from "fs";
+import { mkdir, writeFile } from "fs/promises";
 import { screenshot, log } from "./utils";
 
-const AUTH_STATE_DIR = join(import.meta.dir, "..", "auth-state");
-const DM_AUTH_FILE = join(AUTH_STATE_DIR, "demorgen.json");
+const PROFILE_DIR = join(import.meta.dir, "..", "browser-profile-demorgen");
+const DATA_DIR = join(import.meta.dir, "..", "data");
 
-const DM_EMAIL = process.env.DEMORGEN_EMAIL;
-const DM_PASSWORD = process.env.DEMORGEN_PASSWORD;
+await mkdir(DATA_DIR, { recursive: true });
 
-if (!DM_EMAIL || !DM_PASSWORD) {
-  console.error("Stel DEMORGEN_EMAIL en DEMORGEN_PASSWORD in via .env bestand");
-  process.exit(1);
-}
+const FAVORIETEN_URL = "https://koken.demorgen.be/mijn-favoriete-recepten/";
 
-export async function loginDeMorgen(context: BrowserContext): Promise<Page> {
-  const page = await context.newPage();
-  log("DeMorgen", "Navigeren naar koken.demorgen...");
-
-  await page.goto("https://koken.demorgen.be");
-  await page.waitForLoadState("networkidle");
-  await screenshot(page, "dm-01-homepage");
-
-  // Cookie consent
-  try {
-    const cookieButton = page.locator('button:has-text("Akkoord"), button:has-text("Accepteren"), button:has-text("Accept"), [id*="accept"]');
-    await cookieButton.first().click({ timeout: 5_000 });
-    log("DeMorgen", "Cookie consent afgehandeld");
-    await screenshot(page, "dm-02-after-cookies");
-  } catch {
-    log("DeMorgen", "Geen cookie popup gevonden");
-  }
-
-  // Zoek de inlog-knop
-  log("DeMorgen", "Inlogknop zoeken...");
-  try {
-    const loginLink = page.locator('a:has-text("Inloggen"), a:has-text("Log in"), button:has-text("Inloggen"), [class*="login"]');
-    await loginLink.first().click({ timeout: 5_000 });
-    await page.waitForLoadState("networkidle");
-    await screenshot(page, "dm-03-login-page");
-  } catch {
-    log("DeMorgen", "Geen aparte login knop gevonden, probeer directe URL...");
-    await page.goto("https://koken.demorgen.be/login");
-    await page.waitForLoadState("networkidle");
-    await screenshot(page, "dm-03-login-direct");
-  }
-
-  // Email invullen
-  log("DeMorgen", "Email invullen...");
-  const emailInput = page.locator('input[type="email"], input[name="email"], input[id*="email"], input[placeholder*="mail"]');
-  await emailInput.first().fill(DM_EMAIL!);
-  await screenshot(page, "dm-04-email-filled");
-
-  // Password invullen
-  log("DeMorgen", "Wachtwoord invullen...");
-  const passwordInput = page.locator('input[type="password"], input[name="password"]');
-  await passwordInput.first().fill(DM_PASSWORD!);
-  await screenshot(page, "dm-05-password-filled");
-
-  // Inloggen
-  log("DeMorgen", "Inloggen...");
-  const loginButton = page.locator('button[type="submit"], button:has-text("Inloggen"), button:has-text("Log in")');
-  await loginButton.first().click();
-
-  await page.waitForLoadState("networkidle");
-  await page.waitForTimeout(3_000);
-  await screenshot(page, "dm-06-after-login");
-
-  log("DeMorgen", `Huidige URL na login: ${page.url()}`);
-
-  // Sla sessie op
-  await context.storageState({ path: DM_AUTH_FILE });
-  log("DeMorgen", `Auth state opgeslagen in ${DM_AUTH_FILE}`);
-
-  return page;
-}
-
-export async function getAuthenticatedDeMorgenContext() {
-  const browser = await chromium.launch({
+// Persistent context = echt browserprofiel, sessie blijft bewaard
+export async function getDeMorgenContext() {
+  const context = await chromium.launchPersistentContext(PROFILE_DIR, {
     headless: false,
-    slowMo: 100,
+    slowMo: 50,
+    args: ["--disable-blink-features=AutomationControlled"],
+    viewport: { width: 1280, height: 720 },
+    locale: "nl-BE",
+    timezoneId: "Europe/Brussels",
   });
 
-  if (existsSync(DM_AUTH_FILE)) {
-    log("DeMorgen", "Bestaande sessie gevonden, hergebruiken...");
-    const context = await browser.newContext({ storageState: DM_AUTH_FILE });
-    const page = await context.newPage();
+  const page = context.pages()[0] || (await context.newPage());
 
-    await page.goto("https://koken.demorgen.be");
-    await page.waitForLoadState("networkidle");
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, "webdriver", { get: () => false });
+  });
 
-    // Check of we nog ingelogd zijn
-    const isLoggedIn = await page.evaluate(() => {
-      // Zoek naar indicatoren dat we ingelogd zijn
-      const loginButton = document.querySelector('a:has-text("Inloggen"), button:has-text("Inloggen")');
-      return !loginButton;
-    });
-
-    if (isLoggedIn) {
-      log("DeMorgen", "Sessie is nog geldig!");
-      return { browser, context, page };
-    }
-
-    log("DeMorgen", "Sessie verlopen, opnieuw inloggen...");
-    await page.close();
-    await context.close();
-  }
-
-  const context = await browser.newContext();
-  const page = await loginDeMorgen(context);
-  return { browser, context, page };
+  return { context, page };
 }
 
 if (import.meta.main) {
-  log("DeMorgen", "=== koken.demorgen Login Verkenning ===");
+  log("DeMorgen", "=== koken.demorgen Interactieve Verkenning ===");
+  log("DeMorgen", "");
 
-  const { browser, page } = await getAuthenticatedDeMorgenContext();
+  const { context, page } = await getDeMorgenContext();
 
-  log("DeMorgen", "Ingelogd! Navigeren naar favorieten...");
+  // Navigeer naar favorieten (redirect naar login als niet ingelogd)
+  await page.goto(FAVORIETEN_URL, { waitUntil: "domcontentloaded", timeout: 15_000 });
+  await page.waitForTimeout(3_000);
 
-  // Probeer favorieten te vinden
-  const possibleUrls = [
-    "https://koken.demorgen.be/favorieten",
-    "https://koken.demorgen.be/mijn-recepten",
-    "https://koken.demorgen.be/profiel/favorieten",
-    "https://koken.demorgen.be/account/favorieten",
-  ];
+  // Check of we al ingelogd zijn
+  const currentUrl = page.url();
+  if (currentUrl.includes("koken.demorgen.be/mijn-favoriete-recepten")) {
+    log("DeMorgen", "Je bent al ingelogd! Sessie is nog geldig.");
+  } else {
+    log("DeMorgen", "========================================");
+    log("DeMorgen", "Browser is open.");
+    log("DeMorgen", "");
+    log("DeMorgen", "Stappen:");
+    log("DeMorgen", "1. Log handmatig in op koken.demorgen.be");
+    log("DeMorgen", "2. Navigeer naar je favorieten");
+    log("DeMorgen", "3. Zodra je op de favorieten pagina bent,");
+    log("DeMorgen", "   typ 'ready' in de terminal en druk Enter");
+    log("DeMorgen", "========================================");
+    log("DeMorgen", "");
 
-  for (const url of possibleUrls) {
-    log("DeMorgen", `Probeer: ${url}`);
-    await page.goto(url);
-    await page.waitForLoadState("networkidle");
-    const status = page.url();
-    log("DeMorgen", `  → Redirect naar: ${status}`);
-    if (!status.includes("404") && !status.includes("error")) {
-      await screenshot(page, `dm-07-favorieten-${url.split("/").pop()}`);
-    }
+    const reader = require("readline").createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    await new Promise<void>((resolve) => {
+      const checkReady = () => {
+        reader.question("[DeMorgen] Typ 'ready' als je op de favorieten pagina bent: ", (answer: string) => {
+          if (answer.trim().toLowerCase() === "ready") {
+            reader.close();
+            resolve();
+          } else {
+            checkReady();
+          }
+        });
+      };
+      checkReady();
+    });
   }
 
+  log("DeMorgen", `Huidige URL: ${page.url()}`);
+  await screenshot(page, "dm-favorieten-page");
+
+  // Dump de HTML
+  const html = await page.content();
+  await writeFile(join(DATA_DIR, "dm-favorieten-page.html"), html);
+  log("DeMorgen", "Favorieten HTML opgeslagen in data/dm-favorieten-page.html");
+
+  // Zoek recept-links
+  const recipeLinks = await page.evaluate(() => {
+    const anchors = document.querySelectorAll('a.card-recept-link[href*="/recepten/"]');
+    return [...new Set(Array.from(anchors).map((a) => (a as HTMLAnchorElement).href))];
+  });
+
+  log("DeMorgen", `${recipeLinks.length} recept-links gevonden op de pagina`);
+  recipeLinks.slice(0, 10).forEach((l) => {
+    log("DeMorgen", `  → ${l}`);
+  });
+
   log("DeMorgen", "");
-  log("DeMorgen", "Browser is open. Verken de structuur handmatig.");
-  log("DeMorgen", "Druk Ctrl+C in de terminal om af te sluiten.");
+  log("DeMorgen", "Browser blijft open. Verken verder of druk Ctrl+C om af te sluiten.");
+  log("DeMorgen", "(Browserprofiel is opgeslagen - volgende keer ben je nog ingelogd)");
 
   await new Promise(() => {});
 }

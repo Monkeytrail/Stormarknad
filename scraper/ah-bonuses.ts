@@ -1,6 +1,7 @@
-import { chromium, type Page } from "playwright";
+import { type Page } from "playwright";
 import { writeFile, mkdir } from "fs/promises";
 import { join } from "path";
+import { getAHContext } from "./ah-login";
 import { screenshot, log } from "./utils";
 
 const DATA_DIR = join(import.meta.dir, "..", "data");
@@ -12,43 +13,39 @@ interface Bonus {
   originalPrice: number | null;
   bonusPrice: number | null;
   category: string;
-  validFrom: string;
-  validUntil: string;
+  validFrom: string | null;
+  validUntil: string | null;
   scrapedAt: string;
 }
 
 async function scrapeBonuses(page: Page): Promise<Bonus[]> {
   log("AH-Bonus", "Navigeren naar bonus pagina...");
-  await page.goto("https://www.ah.be/bonus");
-  await page.waitForLoadState("networkidle");
+  await page.goto("https://www.ah.be/bonus", {
+    waitUntil: "domcontentloaded",
+    timeout: 15_000,
+  });
+  await page.waitForTimeout(3_000);
 
-  // Cookie consent afhandelen
-  try {
-    const cookieButton = page.locator('button:has-text("Accepteren"), button:has-text("Alles accepteren")');
-    await cookieButton.first().click({ timeout: 3_000 });
-    log("AH-Bonus", "Cookie consent afgehandeld");
-  } catch {
-    // Geen cookie popup
-  }
-
-  await page.waitForLoadState("networkidle");
+  // Dump HTML voor analyse
+  const html = await page.content();
+  await writeFile(join(DATA_DIR, "ah-bonus-page.html"), html);
   await screenshot(page, "ah-bonus-01-page");
+  log("AH-Bonus", "HTML opgeslagen in data/ah-bonus-page.html");
 
   // Scroll om alle items te laden
   log("AH-Bonus", "Alle bonusproducten laden...");
   let previousHeight = 0;
-  let attempts = 0;
-  while (attempts < 30) {
+  let stableRounds = 0;
+  while (stableRounds < 3) {
     const currentHeight = await page.evaluate(() => document.body.scrollHeight);
     if (currentHeight === previousHeight) {
-      attempts++;
-      if (attempts >= 3) break;
+      stableRounds++;
     } else {
-      attempts = 0;
+      stableRounds = 0;
     }
     previousHeight = currentHeight;
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
-    await page.waitForTimeout(1_000);
+    await page.waitForTimeout(1_500);
   }
   await screenshot(page, "ah-bonus-02-all-loaded");
 
@@ -59,60 +56,56 @@ async function scrapeBonuses(page: Page): Promise<Bonus[]> {
       discountLabel: string;
       originalPrice: number | null;
       bonusPrice: number | null;
-      category: string;
     }[] = [];
 
-    // Zoek bonus product kaarten - probeer meerdere selectors
-    const cards = document.querySelectorAll(
-      '[class*="bonus"] [class*="card"], [class*="product-card"], [data-testid*="bonus"], [class*="promotion"]'
-    );
+    // Zoek promotion kaarten via data-testhook
+    const cards = document.querySelectorAll('[data-testhook="promotion-card"]');
 
     cards.forEach((card) => {
-      const nameEl = card.querySelector('[class*="title"], h3, h4, [class*="name"]');
-      const discountEl = card.querySelector('[class*="discount"], [class*="shield"], [class*="badge"]');
-      const priceEls = card.querySelectorAll('[class*="price"]');
+      // Titel
+      const titleEl = card.querySelector('[data-testhook="promotion-card-title"]');
+      const productName = titleEl?.textContent?.trim() || "";
+      if (!productName) return;
 
-      const productName = nameEl?.textContent?.trim() || "";
-      const discountLabel = discountEl?.textContent?.trim() || "";
+      // Discount label uit aria-label van het label element
+      const labelEl = card.querySelector('[data-testhook="promotion-labels"] [aria-label]');
+      const discountLabel = labelEl?.getAttribute("aria-label") || "";
 
-      // Probeer prijzen te parsen
+      // Prijs: promotion-price bevat [euros+".", centen, originele_prijs]
       let originalPrice: number | null = null;
       let bonusPrice: number | null = null;
 
-      priceEls.forEach((el) => {
-        const text = el.textContent?.trim() || "";
-        const priceMatch = text.match(/([\d,]+)/);
-        if (priceMatch) {
-          const price = parseFloat(priceMatch[1].replace(",", "."));
-          if (el.className.includes("was") || el.className.includes("old") || el.className.includes("original")) {
-            originalPrice = price;
-          } else {
-            bonusPrice = price;
-          }
-        }
-      });
+      const priceEl = card.querySelector('[class*="promotion-price"]');
+      if (priceEl) {
+        // Verzamel alle directe tekst-nodes in price spans/p's
+        const priceParts: string[] = [];
+        priceEl.querySelectorAll("p, span").forEach((el) => {
+          const text = el.textContent?.trim();
+          if (text) priceParts.push(text);
+        });
 
-      if (productName) {
-        items.push({ productName, discountLabel, originalPrice, bonusPrice, category: "" });
+        // Structuur: ["4.", "12", "5.49"] → bonus=4.12, orig=5.49
+        if (priceParts.length >= 3) {
+          const euros = priceParts[0]!.replace(".", "");
+          const cents = priceParts[1]!;
+          bonusPrice = parseFloat(`${euros}.${cents}`);
+          originalPrice = parseFloat(priceParts[2]!);
+        }
       }
+
+      items.push({ productName, discountLabel, originalPrice, bonusPrice });
     });
 
     return items;
   });
 
   const now = new Date().toISOString();
-  // Bonus geldigheid: typisch maandag-zondag
-  const today = new Date();
-  const dayOfWeek = today.getDay();
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
 
   return bonuses.map((b) => ({
     ...b,
-    validFrom: monday.toISOString().split("T")[0],
-    validUntil: sunday.toISOString().split("T")[0],
+    category: "",
+    validFrom: null,
+    validUntil: null,
     scrapedAt: now,
   }));
 }
@@ -120,35 +113,23 @@ async function scrapeBonuses(page: Page): Promise<Bonus[]> {
 if (import.meta.main) {
   log("AH-Bonus", "=== AH.be Bonus Aanbiedingen Scraper ===");
 
-  const browser = await chromium.launch({
-    headless: false,
-    slowMo: 100,
-  });
-
-  const context = await browser.newContext();
-  const page = await context.newPage();
+  const { context, page } = await getAHContext();
 
   try {
     const bonuses = await scrapeBonuses(page);
 
     if (bonuses.length === 0) {
-      log("AH-Bonus", "Geen bonussen gevonden! Check de screenshots.");
-
-      // Dump HTML voor analyse
-      const html = await page.content();
-      await writeFile(join(DATA_DIR, "ah-bonus-page.html"), html);
-      log("AH-Bonus", "HTML opgeslagen in data/ah-bonus-page.html voor analyse");
+      log("AH-Bonus", "Geen bonussen gevonden. Check data/ah-bonus-page.html en screenshots.");
     } else {
       await writeFile(join(DATA_DIR, "ah-bonuses.json"), JSON.stringify(bonuses, null, 2));
-      log("AH-Bonus", `\n=== Klaar! ${bonuses.length} bonussen opgeslagen in data/ah-bonuses.json ===`);
+      log("AH-Bonus", `\n=== Klaar! ${bonuses.length} bonussen opgeslagen ===`);
 
-      // Toon een paar voorbeelden
       bonuses.slice(0, 5).forEach((b) => {
         log("AH-Bonus", `  - ${b.productName}: ${b.discountLabel}`);
       });
     }
   } finally {
-    await browser.close();
+    await context.close();
   }
 }
 

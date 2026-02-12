@@ -1,0 +1,55 @@
+---
+import Base from "../layouts/Base.astro";
+import { db } from "../db/client";
+import { recipes, bonuses, menuWeeks, menuSlots } from "../db/schema";
+import { sql, desc, eq } from "drizzle-orm";
+
+// Statistieken
+const [recipeCount] = await db.select({ n: sql<number>`count(*)` }).from(recipes);
+const [bonusCount] = await db.select({ n: sql<number>`count(*)` }).from(bonuses);
+
+// Huidig weekmenu
+const [currentMenu] = await db
+  .select()
+  .from(menuWeeks)
+  .orderBy(desc(menuWeeks.createdAt))
+  .limit(1);
+
+let menuRecipeCount = 0;
+if (currentMenu) {
+  const [slotCount] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(menuSlots)
+    .where(eq(menuSlots.menuWeekId, currentMenu.id));
+  menuRecipeCount = slotCount?.n ?? 0;
+}
+---
+
+<Base title="Dashboard">
+  <div class="page-header">
+    <h1>Stormarknad</h1>
+    <p>Weekmenu & boodschappenlijst</p>
+  </div>
+
+  <div class="dashboard-stats">
+    <div class="stat-card">
+      <div class="stat-value">{recipeCount?.n ?? 0}</div>
+      <div class="stat-label">Recepten</div>
+      <a href="/recepten" class="stat-link">Bekijk alle &rarr;</a>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-value">{bonusCount?.n ?? 0}</div>
+      <div class="stat-label">Bonussen</div>
+      <div class="stat-hint">Deze week</div>
+    </div>
+
+    <div class="stat-card">
+      <div class="stat-value">{menuRecipeCount}/7</div>
+      <div class="stat-label">Weekmenu</div>
+      <a href="/menu" class="stat-link">
+        {currentMenu ? "Bekijk menu" : "Genereer menu"} &rarr;
+      </a>
+    </div>
+  </div>
+</Base>

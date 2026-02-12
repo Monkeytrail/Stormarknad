@@ -1,0 +1,10 @@
+---
+interface Props {
+  name: string;
+  bonus?: boolean;
+}
+
+const { name, bonus = false } = Astro.props;
+---
+
+<span class:list={["tag", { bonus }]}>{name}</span>
