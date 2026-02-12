@@ -544,12 +544,15 @@ main {
 }
 
 .recipe-detail .original-link {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.375rem;
-  margin-top: 2rem;
-  font-size: 0.875rem;
-  font-weight: 500;
+  font-size: 0.6em;
+  text-decoration: none;
+  opacity: 0.4;
+  transition: opacity 0.15s;
+  vertical-align: middle;
+}
+
+.recipe-detail .original-link:hover {
+  opacity: 0.8;
 }
 
 /* ─── Menu Page ─────────────────────────────────────────── */

@@ -51,7 +51,7 @@ function formatQty(ing: { quantity: string; unit: string }) {
 
     {recipe.imageUrl && <img src={recipe.imageUrl} alt={recipe.title} class="hero-img" />}
 
-    <h1>{recipe.title}</h1>
+    <h1>{recipe.title} <a href={recipe.url} target="_blank" rel="noopener" class="original-link" title="Bekijk origineel recept">&#x1F517;</a></h1>
 
     <div class="detail-meta">
       <div>
@@ -115,6 +115,5 @@ function formatQty(ing: { quantity: string; unit: string }) {
       {recipeInstructions.map((step) => <li><span>{step.text}</span></li>)}
     </ol>
 
-    <a href={recipe.url} target="_blank" rel="noopener" class="original-link">Bekijk origineel recept &rarr;</a>
   </div>
 </Base>
