@@ -1,5 +1,6 @@
 ---
 import Base from "../../layouts/Base.astro";
+import { sourceShort } from "../../lib/source";
 import { db } from "../../db/client";
 import { menuWeeks, menuSlots, recipes } from "../../db/schema";
 import { desc, eq } from "drizzle-orm";
@@ -101,9 +102,7 @@ if (currentMenu) {
               </h4>
               <div class="card-meta">
                 {slot.recipe.prepTime && <span>{slot.recipe.prepTime} min</span>}
-                <span class:list={["source", slot.recipe.source === "ah.be" ? "ah" : "dm"]}>
-                  {slot.recipe.source === "ah.be" ? "AH" : "DM"}
-                </span>
+                {(() => { const s = sourceShort(slot.recipe.source); return <span class:list={["source", s.cssClass]}>{s.label}</span>; })()}
               </div>
               <div class="actions">
                 <form method="post" action="/api/menu/swap">

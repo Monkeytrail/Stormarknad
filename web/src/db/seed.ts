@@ -19,15 +19,20 @@ const ahBonuses = JSON.parse(await readFile(join(DATA_DIR, "ah-bonuses.json"), "
 // Discover recepten (optioneel)
 const ahDiscoverPath = join(DATA_DIR, "ah-discover.json");
 const dmDiscoverPath = join(DATA_DIR, "dm-discover.json");
+const gramRecipesPath = join(DATA_DIR, "15gram-recipes.json");
 const ahDiscover = existsSync(ahDiscoverPath)
   ? JSON.parse(await readFile(ahDiscoverPath, "utf-8"))
   : [];
 const dmDiscover = existsSync(dmDiscoverPath)
   ? JSON.parse(await readFile(dmDiscoverPath, "utf-8"))
   : [];
+const gramRecipes = existsSync(gramRecipesPath)
+  ? JSON.parse(await readFile(gramRecipesPath, "utf-8"))
+  : [];
 
 console.log(`  AH favorieten:  ${ahRecipes.length}`);
 console.log(`  DM favorieten:  ${dmRecipes.length}`);
+console.log(`  15gram:         ${gramRecipes.length}`);
 console.log(`  AH discover:    ${ahDiscover.length}`);
 console.log(`  DM discover:    ${dmDiscover.length}`);
 console.log(`  AH bonussen:    ${ahBonuses.length}`);
@@ -58,7 +63,7 @@ let tagId = 1;
 const seenUrls = new Set<string>();
 const allRecipesWithFav: { recipe: any; isFavorite: boolean }[] = [];
 
-for (const r of [...ahRecipes, ...dmRecipes]) {
+for (const r of [...ahRecipes, ...dmRecipes, ...gramRecipes]) {
   if (!seenUrls.has(r.url)) {
     seenUrls.add(r.url);
     allRecipesWithFav.push({ recipe: r, isFavorite: true });

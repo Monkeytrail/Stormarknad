@@ -339,6 +339,16 @@ main {
   color: #92400e;
 }
 
+.source.gram {
+  background: #fdf4ff;
+  color: #7e22ce;
+}
+
+.source.imp {
+  background: #f0fdf4;
+  color: #166534;
+}
+
 /* ─── Favorite / Discover Badge ─────────────────────────── */
 .badge {
   font-size: 0.7rem;

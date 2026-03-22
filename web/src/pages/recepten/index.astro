@@ -64,7 +64,9 @@ let filtered = allRecipes;
 if (search && searchRecipeIds) {
   filtered = filtered.filter((r) => searchRecipeIds!.has(r.id));
 }
-if (source) {
+if (source === "__imported") {
+  filtered = filtered.filter((r) => r.source !== "ah.be" && r.source !== "koken.demorgen");
+} else if (source) {
   filtered = filtered.filter((r) => r.source === source);
 }
 if (typeFilter) {
@@ -84,6 +86,29 @@ if (tagFilter) {
     <p>{filtered.length} recepten</p>
   </div>
 
+  <!-- URL import -->
+  <div class="import-box">
+    <form id="import-form" class="import-form">
+      <input type="url" id="import-url" placeholder="Plak een recept-URL..." required class="import-input" />
+      <button type="submit" class="btn-primary" id="import-btn">Importeer</button>
+    </form>
+    <p id="import-status" class="import-status" aria-live="polite"></p>
+
+    <div id="import-preview" class="import-preview" hidden>
+      <div class="preview-inner">
+        <img id="preview-img" src="" alt="" class="preview-img" hidden />
+        <div class="preview-info">
+          <div id="preview-title" class="preview-title"></div>
+          <div id="preview-meta" class="preview-meta"></div>
+        </div>
+      </div>
+      <div class="preview-actions">
+        <button id="save-btn" class="btn-primary">Opslaan</button>
+        <button id="cancel-btn" class="btn-secondary">Annuleer</button>
+      </div>
+    </div>
+  </div>
+
   <div class="filters">
     <form method="get">
       <input type="text" name="q" value={search} placeholder="Zoek op ingrediënt..." />
@@ -91,6 +116,8 @@ if (tagFilter) {
         <option value="">Alle bronnen</option>
         <option value="ah.be" selected={source === "ah.be"}>Albert Heijn</option>
         <option value="koken.demorgen" selected={source === "koken.demorgen"}>De Morgen</option>
+        <option value="15gram.be" selected={source === "15gram.be"}>15gram</option>
+        <option value="__imported" selected={source === "__imported"}>Geïmporteerd</option>
       </select>
       <select name="type" onchange="this.form.submit()">
         <option value="">Alle recepten</option>
@@ -123,3 +150,166 @@ if (tagFilter) {
     ))}
   </div>
 </Base>
+
+<style>
+  .import-box {
+    margin-bottom: 1.5rem;
+  }
+  .import-form {
+    display: flex;
+    gap: 0.5rem;
+  }
+  .import-input {
+    flex: 1;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--bg-card);
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+  .import-status {
+    font-size: 0.85rem;
+    min-height: 1.4em;
+    margin: 0.4rem 0 0;
+    color: var(--text-muted, #888);
+  }
+  .import-status.error { color: #e53e3e; }
+  .import-status.success { color: #48bb78; }
+
+  .import-preview {
+    margin-top: 0.75rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-card);
+  }
+  .import-preview[hidden] { display: none; }
+  .preview-inner {
+    display: flex;
+    gap: 0.75rem;
+    align-items: flex-start;
+    margin-bottom: 0.75rem;
+  }
+  .preview-img {
+    width: 80px;
+    height: 56px;
+    object-fit: cover;
+    border-radius: 4px;
+    flex-shrink: 0;
+  }
+  .preview-img[hidden] { display: none; }
+  .preview-title { font-weight: 600; margin-bottom: 0.2rem; }
+  .preview-meta { font-size: 0.8rem; color: var(--text-muted, #888); }
+  .preview-actions { display: flex; gap: 0.5rem; }
+</style>
+
+<script>
+  let parsedRecipe: any = null;
+
+  const form = document.getElementById('import-form') as HTMLFormElement;
+  const urlInput = document.getElementById('import-url') as HTMLInputElement;
+  const importBtn = document.getElementById('import-btn') as HTMLButtonElement;
+  const status = document.getElementById('import-status')!;
+  const preview = document.getElementById('import-preview')!;
+  const previewImg = document.getElementById('preview-img') as HTMLImageElement;
+  const previewTitle = document.getElementById('preview-title')!;
+  const previewMeta = document.getElementById('preview-meta')!;
+  const saveBtn = document.getElementById('save-btn') as HTMLButtonElement;
+  const cancelBtn = document.getElementById('cancel-btn') as HTMLButtonElement;
+
+  function setStatus(msg: string, type = '') {
+    status.textContent = msg;
+    status.className = `import-status${type ? ' ' + type : ''}`;
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const url = urlInput.value.trim();
+    if (!url) return;
+
+    importBtn.disabled = true;
+    importBtn.textContent = 'Bezig...';
+    setStatus('Recept ophalen...');
+    preview.hidden = true;
+    parsedRecipe = null;
+
+    try {
+      const res = await fetch('/api/recepten/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setStatus(data.error || 'Ophalen mislukt', 'error');
+        return;
+      }
+
+      parsedRecipe = data;
+
+      previewTitle.textContent = data.title;
+      const meta = [
+        data.source,
+        data.servings ? `${data.servings} pers.` : null,
+        data.prepTime ? `${data.prepTime} min` : null,
+        `${data.ingredients.length} ingrediënten`,
+        `${data.instructions.length} stappen`,
+      ].filter(Boolean).join(' · ');
+      previewMeta.textContent = meta;
+
+      if (data.imageUrl) {
+        previewImg.src = data.imageUrl;
+        previewImg.hidden = false;
+      } else {
+        previewImg.hidden = true;
+      }
+
+      setStatus('');
+      preview.hidden = false;
+    } catch {
+      setStatus('Netwerkfout', 'error');
+    } finally {
+      importBtn.disabled = false;
+      importBtn.textContent = 'Importeer';
+    }
+  });
+
+  saveBtn.addEventListener('click', async () => {
+    if (!parsedRecipe) return;
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Opslaan...';
+
+    try {
+      const res = await fetch('/api/recepten/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(parsedRecipe),
+      });
+      const data = await res.json();
+
+      if (res.status === 201) {
+        window.location.href = `/recepten/${data.id}`;
+      } else if (data.duplicate) {
+        setStatus('Al opgeslagen!', 'success');
+        window.location.href = `/recepten/${data.id}`;
+      } else {
+        setStatus(data.error || 'Opslaan mislukt', 'error');
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Opslaan';
+      }
+    } catch {
+      setStatus('Netwerkfout', 'error');
+      saveBtn.disabled = false;
+      saveBtn.textContent = 'Opslaan';
+    }
+  });
+
+  cancelBtn.addEventListener('click', () => {
+    preview.hidden = true;
+    parsedRecipe = null;
+    urlInput.value = '';
+    setStatus('');
+  });
+</script>

@@ -1,5 +1,6 @@
 ---
 import TagBadge from "./TagBadge.astro";
+import { sourceShort } from "../lib/source";
 
 interface Props {
   id: number;
@@ -13,8 +14,7 @@ interface Props {
 }
 
 const { id, title, imageUrl, prepTime, servings, source, isFavorite, tags } = Astro.props;
-const sourceClass = source === "ah.be" ? "ah" : "dm";
-const sourceLabel = source === "ah.be" ? "AH" : "DM";
+const { label: sourceLabel, cssClass: sourceClass } = sourceShort(source);
 ---
 
 <article class="recipe-card">

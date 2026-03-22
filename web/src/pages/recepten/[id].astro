@@ -1,6 +1,7 @@
 ---
 import Base from "../../layouts/Base.astro";
 import TagBadge from "../../components/TagBadge.astro";
+import { sourceShort, sourceLong } from "../../lib/source";
 import { db } from "../../db/client";
 import { recipes, ingredients, instructions, recipeTags, tags } from "../../db/schema";
 import { eq, asc } from "drizzle-orm";
@@ -36,8 +37,8 @@ const recipeTags_ = await db
   .innerJoin(tags, eq(recipeTags.tagId, tags.id))
   .where(eq(recipeTags.recipeId, recipeId));
 
-const sourceClass = recipe.source === "ah.be" ? "ah" : "dm";
-const sourceLabel = recipe.source === "ah.be" ? "Albert Heijn" : "De Morgen";
+const { cssClass: sourceClass } = sourceShort(recipe.source);
+const sourceLabel = sourceLong(recipe.source);
 
 function formatQty(ing: { quantity: string; unit: string }) {
   const parts = [ing.quantity, ing.unit].filter(Boolean);
